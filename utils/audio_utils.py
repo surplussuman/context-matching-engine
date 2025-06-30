@@ -4,7 +4,6 @@ import os
 import ffmpeg
 from faster_whisper import WhisperModel
 import datetime
-import speech_recognition as sr
 
 def extract_audio(video_path, output_audio_path="output_audio.wav"):
     """

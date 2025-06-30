@@ -4,6 +4,7 @@ from utils.audio_utils import extract_audio, transcribe_audio
 from utils.db_utils import insert_transcript, init_db, fetch_all_transcripts
 from utils.video_utils import download_video_from_url
 import difflib
+import datetime
 
 # Initialize DB on startup
 init_db()
@@ -13,7 +14,7 @@ st.set_page_config(page_title="DMX CME", layout="wide")
 
 # Sidebar navigation
 st.sidebar.title("Context Matching Engine")
-app_mode = st.sidebar.radio("Go to", ["Upload Content", "Check Similarity", "View Uploaded Contents"])
+app_mode = st.sidebar.radio("Go to", ["Check Similarity","Upload Content", "View Uploaded Contents"])
 
 # Create upload folder
 os.makedirs("data/uploads", exist_ok=True)
@@ -65,48 +66,75 @@ if app_mode == "Upload Content":
 
 elif app_mode == "Check Similarity":
     st.header("🔍 Check Video Similarity")
-    st.markdown("Paste a video URL (YouTube, Facebook, etc.). We'll extract its content and match it against existing videos.")
+    st.markdown("Upload a video file **or** paste a video URL. We'll extract its content and match it against previously uploaded content.")
 
-    url = st.text_input("Paste the video URL here")
+    # Tabs for two input methods
+    input_method = st.radio("Choose Input Method:", ["📎 Upload File", "🔗 Paste URL"])
 
-    if st.button("🚀 Process and Check Similarity") and url:
-        with st.spinner("Downloading video..."):
-            downloaded_path = download_video_from_url(url)
+    transcript = None
+    source_label = None
 
-        if downloaded_path and os.path.exists(downloaded_path):
-            st.success(f"Video downloaded: {os.path.basename(downloaded_path)}")
+    if input_method == "📎 Upload File":
+        uploaded_file = st.file_uploader("Upload a video file", type=["mp4", "mov", "mkv", "avi"])
 
-            with st.spinner("Extracting and transcribing audio..."):
-                audio_path = extract_audio(downloaded_path, output_audio_path="data/temp_url_audio.wav")
+        if uploaded_file and st.button("🚀 Process Uploaded File"):
+            # Save uploaded video
+            uploaded_path = os.path.join("data/uploads", uploaded_file.name)
+            with open(uploaded_path, "wb") as f:
+                f.write(uploaded_file.read())
+
+            st.success(f"Uploaded file: {uploaded_file.name}")
+
+            with st.spinner("Extracting audio and transcribing..."):
+                audio_path = extract_audio(uploaded_path, output_audio_path="data/temp_uploaded_audio.wav")
                 if audio_path:
                     transcript = transcribe_audio(audio_path)
-                    if transcript:
-                        st.success("Transcript extracted from URL!")
-
-                        # Compare with all saved transcripts in DB
-                        st.markdown("---")
-                        st.subheader("🧠 Similarity Scores")
-                        db_transcripts = fetch_all_transcripts()
-
-                        if not db_transcripts:
-                            st.warning("No uploaded content found in database.")
-                        else:
-                            for record in db_transcripts:
-                                similarity_ratio = difflib.SequenceMatcher(
-                                    None, record["transcript"], transcript
-                                ).ratio()
-
-                                percentage = round(similarity_ratio * 100, 2)
-
-                                with st.expander(f"📹 {record['video_name']} - Similarity: {percentage}%"):
-                                    st.text_area("Transcript from DB:", record["transcript"], height=200, disabled=True)
-                                    st.text_area("Transcript from URL:", transcript, height=200, disabled=True)
-                    else:
-                        st.error("Transcription failed.")
+                    source_label = uploaded_file.name
                 else:
                     st.error("Audio extraction failed.")
+
+    elif input_method == "🔗 Paste URL":
+        url = st.text_input("Paste the video URL here")
+
+        if st.button("🚀 Download and Process URL") and url:
+            with st.spinner("Downloading video..."):
+                st.success("Downloading started at: " + str(datetime.datetime.now()))
+                downloaded_path = download_video_from_url(url)
+
+            if downloaded_path and os.path.exists(downloaded_path):
+                st.success(f"Video downloaded: {os.path.basename(downloaded_path)}")
+                st.success("Downloaded at: " + str(datetime.datetime.now()))
+
+                with st.spinner("Extracting and transcribing audio..."):
+                    audio_path = extract_audio(downloaded_path, output_audio_path="data/temp_url_audio.wav")
+                    if audio_path:
+                        transcript = transcribe_audio(audio_path)
+                        source_label = url
+                    else:
+                        st.error("Audio extraction failed.")
+            else:
+                st.error("Failed to download video from URL.")
+
+    # If transcription succeeded from either method
+    if transcript:
+        st.success("Transcript ready!")
+
+        st.markdown("---")
+        st.subheader("🧠 Similarity Scores")
+        db_transcripts = fetch_all_transcripts()
+
+        if not db_transcripts:
+            st.warning("No uploaded content found in database.")
         else:
-            st.error("Failed to download video from URL.")
+            for idx, record in enumerate(db_transcripts):
+                similarity_ratio = difflib.SequenceMatcher(None, record["transcript"], transcript).ratio()
+                percentage = round(similarity_ratio * 100, 2)
+
+                with st.expander(f"📹 {record['video_name']} - Similarity: {percentage}%"):
+                    st.text_area("Transcript from DB:", record["transcript"], height=200, disabled=True,
+                                 key=f"db_transcript_{idx}")
+                    st.text_area("Transcript from Input Video:", transcript, height=200, disabled=True,
+                                 key=f"input_transcript_{idx}")
 
 
 elif app_mode == "View Uploaded Contents":
